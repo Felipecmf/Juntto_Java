@@ -9,7 +9,6 @@ import br.com.juntto.dto.PagamentoRequest;
 import br.com.juntto.dto.PedidoRequest;
 import br.com.juntto.dto.PedidoResponse;
 import br.com.juntto.dto.StatusPedidoRequest;
-import br.com.juntto.dto.UsuarioIdRequest;
 import br.com.juntto.model.Pedido;
 import br.com.juntto.service.Notificador;
 import br.com.juntto.service.PedidoService;
@@ -64,7 +63,7 @@ public class PedidoController {
                 pedidoService.listarAbertos(tipo, idCategoria, valorMin, valorMax, data), PedidoResponse.class));
     }
 
-    // ?usuarioId= opcional: se for quem publicou ou o candidato escolhido, os e-mails de contato aparecem
+    // ?usuarioId= opcional: se for quem publicou ou um candidato aceito, os e-mails de contato aparecem
     @GetMapping("/pedidos/{id}")
     public ResponseEntity<PedidoResponse> buscar(@PathVariable("id") String id,
                                                  @RequestParam(value = "usuarioId", required = false) String usuarioId) {
@@ -83,19 +82,15 @@ public class PedidoController {
         return ResponseEntity.noContent().build();
     }
 
-    // Andamento: EM_ANDAMENTO, AGUARDANDO_CONFIRMACAO, CONCLUIDO ou CANCELADO
+    // Andamento: CONCLUIDO (com caixinha opcional) ou CANCELADO
     @PatchMapping("/pedidos/{id}/status")
     public ResponseEntity<PedidoResponse> alterarStatus(@PathVariable("id") String id, @Valid @RequestBody StatusPedidoRequest pedido) {
         return ResponseEntity.ok(Conversor.converter(pedidoService.alterarStatus(id, pedido), PedidoResponse.class));
     }
 
-    @PostMapping("/pedidos/{id}/pagamento")
-    public ResponseEntity<PedidoResponse> registrarPagamento(@PathVariable("id") String id, @Valid @RequestBody PagamentoRequest pedido) {
-        return ResponseEntity.ok(Conversor.converter(pedidoService.registrarPagamento(id, pedido), PedidoResponse.class));
-    }
-
+    // O pagamento acontece fora do app: quem recebeu confirma (idCandidatura em OFERTA com vários aceitos)
     @PatchMapping("/pedidos/{id}/pagamento/confirmacao")
-    public ResponseEntity<PedidoResponse> confirmarPagamento(@PathVariable("id") String id, @Valid @RequestBody UsuarioIdRequest pedido) {
-        return ResponseEntity.ok(Conversor.converter(pedidoService.confirmarPagamento(id, pedido.getUsuarioId()), PedidoResponse.class));
+    public ResponseEntity<PedidoResponse> confirmarPagamento(@PathVariable("id") String id, @Valid @RequestBody PagamentoRequest pedido) {
+        return ResponseEntity.ok(Conversor.converter(pedidoService.confirmarPagamento(id, pedido), PedidoResponse.class));
     }
 }

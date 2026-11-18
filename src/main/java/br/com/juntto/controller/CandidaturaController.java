@@ -66,7 +66,7 @@ public class CandidaturaController {
         return ResponseEntity.ok(Conversor.converter(candidaturaService.buscar(id, usuarioId), CandidaturaResponse.class));
     }
 
-    // O solicitante escolhe (ESCOLHIDO) ou recusa (RECUSADO) um candidato
+    // Quem publicou aceita (ACEITA) ou recusa (RECUSADA) um candidato
     @PutMapping("/candidaturas/{id}")
     public ResponseEntity<CandidaturaResponse> atualizar(@PathVariable("id") String id, @Valid @RequestBody CandidaturaUpdateRequest pedido) {
         return ResponseEntity.ok(Conversor.converter(candidaturaService.atualizar(id, pedido.getUsuarioId(), pedido.getStatus()),

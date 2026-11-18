@@ -18,7 +18,7 @@ public class CandidaturaDAO implements RepositorioCandidaturas {
     // Candidatura + dados do prestador (nome, foto e avaliações, para o solicitante escolher) + dados do pedido
     private static final String SELECT =
             "SELECT ca.id_candidatura, ca.dt_oferta, ca.status, ca.status_pagamento, ca.dt_confirmacao_pagamento, "
-          + "ca.tb_pedido_id_pedido, ca.tb_usuario_id_usuario, u.nome || ' ' || u.sobrenome AS nm_prestador, u.photo_url, "
+          + "ca.tb_pedido_id_pedido, ca.tb_usuario_id_usuario, u.nome || ' ' || u.sobrenome AS nm_prestador, u.photo_url, u.email, "
           + "(SELECT ROUND(AVG(a.estrelas), 1) FROM " + Jdbc.AVALIACOES_RECEBIDAS + " a WHERE a.id_avaliado = u.id_usuario) AS media_estrelas, "
           + "(SELECT COUNT(*) FROM " + Jdbc.AVALIACOES_RECEBIDAS + " a WHERE a.id_avaliado = u.id_usuario) AS total_avaliacoes, "
           + "p.titulo_pedido, p.status AS status_pedido, p.tb_usuario_id_usuario AS id_solicitante "
@@ -76,9 +76,22 @@ public class CandidaturaDAO implements RepositorioCandidaturas {
     }
 
     @Override
-    public Candidatura buscarEscolhida(String idPedido) {
-        ArrayList<Candidatura> lista = consultar(SELECT + "WHERE ca.tb_pedido_id_pedido=? AND ca.status='ESCOLHIDO'", idPedido);
-        return lista.isEmpty() ? null : lista.get(0);
+    public ArrayList<Candidatura> obterAceitas(String idPedido) {
+        return consultar(SELECT + "WHERE ca.tb_pedido_id_pedido=? AND ca.status='ACEITA' ORDER BY ca.dt_oferta", idPedido);
+    }
+
+    // Pagamentos que ninguém confirmou até o limite (pedido concluído antes de 'limite')
+    @Override
+    public ArrayList<Candidatura> obterPagamentosPendentesAte(LocalDateTime limite) {
+        return consultar(SELECT + "WHERE ca.status='ACEITA' AND ca.status_pagamento='PENDENTE' AND p.status='CONCLUIDO' "
+                + "AND p.dt_final < ?", limite);
+    }
+
+    // Quando o dono muda o pedido entre "com" e "sem" pagamento, as candidaturas ainda na fila acompanham
+    @Override
+    public void alterarStatusPagamentoDasPendentes(String idPedido, StatusPagamento status) {
+        executar("UPDATE tb_candidatura_pedido SET status_pagamento=? WHERE tb_pedido_id_pedido=? AND status='PENDENTE'",
+                status, idPedido);
     }
 
     @Override
@@ -142,6 +155,7 @@ public class CandidaturaDAO implements RepositorioCandidaturas {
         ca.setIdPrestador(rs.getString("tb_usuario_id_usuario"));
         ca.setNomePrestador(rs.getString("nm_prestador"));
         ca.setFotoPrestador(rs.getString("photo_url"));
+        ca.setEmailPrestador(rs.getString("email"));
         ca.setMediaEstrelasPrestador(Jdbc.lerDouble(rs, "media_estrelas"));
         ca.setTotalAvaliacoesPrestador(rs.getInt("total_avaliacoes"));
         ca.setTituloPedido(rs.getString("titulo_pedido"));

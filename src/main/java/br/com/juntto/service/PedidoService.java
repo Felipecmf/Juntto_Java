@@ -6,6 +6,7 @@ import br.com.juntto.dao.RepositorioPedidos;
 import br.com.juntto.dao.RepositorioUsuarios;
 import br.com.juntto.dto.PagamentoRequest;
 import br.com.juntto.dto.StatusPedidoRequest;
+import br.com.juntto.exception.AcessoNegadoException;
 import br.com.juntto.exception.DadosInvalidosException;
 import br.com.juntto.exception.RecursoNaoEncontradoException;
 import br.com.juntto.exception.RegraNegocioException;
@@ -69,11 +70,12 @@ public class PedidoService {
         return pedidos;
     }
 
-    // usuarioId é opcional: se for o solicitante ou o prestador escolhido, os e-mails de contato aparecem
+    // usuarioId é opcional: os e-mails de contato só aparecem para os participantes
+    // (quem publicou e quem tem candidatura aceita)
     public Pedido buscar(String id, String usuarioId) {
         verificarPrazos();
         Pedido p = buscarExistente(id);
-        if (!p.ehSolicitante(usuarioId) && !p.ehPrestador(usuarioId)) {
+        if (!participa(p, usuarioId)) {
             esconderContatos(p);
         }
         return p;
@@ -95,7 +97,7 @@ public class PedidoService {
             throw new DadosInvalidosException("O campo 'papel' deve ser SOLICITANTE ou PRESTADOR.");
         }
         for (Pedido p : pedidos) {
-            if (!p.ehSolicitante(usuarioId) && !p.ehPrestador(usuarioId)) {
+            if (!participa(p, usuarioId)) {
                 esconderContatos(p);
             }
         }
@@ -109,6 +111,8 @@ public class PedidoService {
         validarDados(novo);
         novo.setId(id);
         repositorioPedidos.atualizar(novo);
+        // quem ainda está na fila acompanha a mudança entre "com" e "sem" pagamento
+        repositorioCandidaturas.alterarStatusPagamentoDasPendentes(id, statusPagamentoInicial(novo));
         System.out.println("[AUDITORIA] Pedido atualizado: " + id);
         return repositorioPedidos.buscarPorId(id);
     }
@@ -120,7 +124,7 @@ public class PedidoService {
         p.validarEditavel();
         if (repositorioPedidos.possuiVinculos(id)) {
             repositorioPedidos.alterarStatus(id, StatusPedido.CANCELADO);
-            recusarPendentes(p, "foi cancelado pelo solicitante");
+            recusarPendentes(p, "foi cancelado por quem publicou");
             System.out.println("[AUDITORIA] Pedido cancelado: " + id);
         } else {
             repositorioPedidos.remover(id);
@@ -130,156 +134,199 @@ public class PedidoService {
 
     // ============================== ANDAMENTO ==============================
 
-    // Aberto -> Aceito -> Em andamento -> Aguardando confirmação -> Concluído (-> Finalizado após o pagamento)
-    // EM_ANDAMENTO (quem ajuda inicia) | AGUARDANDO_CONFIRMACAO (quem ajuda terminou)
-    // CONCLUIDO (quem recebeu a ajuda confirma) | CANCELADO (quem publicou, antes de iniciar)
-    // Em AJUDA quem ajuda é o candidato escolhido; em OFERTA quem ajuda é quem publicou.
-    // O candidato desiste pelo DELETE /candidaturas/{id}
+    // Status do documento de banco: ABERTO, EM_ANDAMENTO, CONCLUIDO e CANCELADO.
+    // AJUDA:  ABERTO -> EM_ANDAMENTO (automático, quando quem publicou aceita um candidato) -> CONCLUIDO
+    // OFERTA: ABERTO (aceita vários interessados) -> CONCLUIDO
+    // Por esta rota: CONCLUIDO (em AJUDA quem recebeu a ajuda; em OFERTA quem ofereceu) ou CANCELADO (quem publicou).
+    // O candidato desiste pelo DELETE /candidaturas/{id}.
     public Pedido alterarStatus(String id, StatusPedidoRequest pedido) {
         String usuarioId = pedido.getUsuarioId();
         StatusPedido novo = pedido.getStatus();
         Pedido p = buscarExistente(id);
-        String candidatura = p.getIdCandidaturaEscolhida();
-
-        if (novo == StatusPedido.EM_ANDAMENTO) {
-            p.validarAjudante(usuarioId);
-            p.validarStatus(StatusPedido.ACEITO, "iniciar o serviço");
-            repositorioPedidos.alterarStatus(id, StatusPedido.EM_ANDAMENTO);
-            notificador.enviar(p.getIdAjudado(), TipoNotificacao.SERVICO_INICIADO,
-                    p.nomeDoAjudante() + " iniciou o serviço \"" + p.getTitulo() + "\".", id, candidatura);
-        } else if (novo == StatusPedido.AGUARDANDO_CONFIRMACAO) {
-            p.validarAjudante(usuarioId);
-            p.validarStatus(StatusPedido.EM_ANDAMENTO, "marcar como terminado");
-            repositorioPedidos.alterarStatus(id, StatusPedido.AGUARDANDO_CONFIRMACAO);
-            notificador.enviar(p.getIdAjudado(), TipoNotificacao.SERVICO_TERMINADO,
-                    p.nomeDoAjudante() + " terminou o serviço \"" + p.getTitulo() + "\". Confirme a conclusão.", id, candidatura);
-        } else if (novo == StatusPedido.CONCLUIDO) {
-            concluir(p, usuarioId);
+        if (novo == StatusPedido.CONCLUIDO) {
+            concluir(p, usuarioId, pedido.getCaixinha());
         } else if (novo == StatusPedido.CANCELADO) {
             cancelarPeloSolicitante(p, usuarioId);
         } else {
-            throw new DadosInvalidosException("Use EM_ANDAMENTO, AGUARDANDO_CONFIRMACAO, CONCLUIDO ou CANCELADO.");
+            throw new DadosInvalidosException("Use CONCLUIDO ou CANCELADO. EM_ANDAMENTO é automático quando um candidato é aceito.");
         }
         System.out.println("[AUDITORIA] Pedido " + id + " -> " + novo + " por " + usuarioId);
         return repositorioPedidos.buscarPorId(id);
     }
 
-    // Quem recebeu a ajuda confirma a conclusão. A data/hora real do fim é gravada em dt_final.
-    // Publicação sem pagamento (naoIncluirPagamento, e toda OFERTA) já termina FINALIZADA.
-    private void concluir(Pedido p, String usuarioId) {
-        p.validarAjudado(usuarioId);
-        p.validarStatus(StatusPedido.AGUARDANDO_CONFIRMACAO, "confirmar a conclusão");
-        StatusPedido status = p.semPagamento() ? StatusPedido.FINALIZADO : StatusPedido.CONCLUIDO;
-        repositorioPedidos.concluir(p.getId(), status, LocalDateTime.now());
-        recusarPendentes(p, "foi concluído com outro prestador");
-        String mensagem = p.semPagamento()
-                ? "A conclusão de \"" + p.getTitulo() + "\" foi confirmada. Ajuda finalizada, obrigado!"
-                : "A conclusão de \"" + p.getTitulo() + "\" foi confirmada. Aguarde o registro do pagamento.";
-        notificador.enviar(p.getIdAjudante(), TipoNotificacao.PEDIDO_CONCLUIDO, mensagem, p.getId(), p.getIdCandidaturaEscolhida());
+    // AJUDA: quem recebeu a ajuda (quem publicou) confirma, com o pedido EM_ANDAMENTO, e pode informar a caixinha.
+    // OFERTA: quem ofereceu encerra a oferta, que precisa ter pelo menos um interessado aceito.
+    // A data/hora real do fim é gravada em dt_final; quem ainda estava na fila é recusado.
+    private void concluir(Pedido p, String usuarioId, Double caixinha) {
+        p.validarSolicitante(usuarioId);
+        ArrayList<Candidatura> aceitas = repositorioCandidaturas.obterAceitas(p.getId());
+        if (p.ehOferta()) {
+            p.validarStatus(StatusPedido.ABERTO, "encerrar a oferta");
+            if (aceitas.isEmpty()) {
+                throw new RegraNegocioException("Aceite pelo menos um interessado antes de concluir a oferta (ou cancele).");
+            }
+            if (caixinha != null) {
+                throw new DadosInvalidosException("Caixinha só existe ao concluir um pedido de AJUDA.");
+            }
+        } else {
+            p.validarStatus(StatusPedido.EM_ANDAMENTO, "concluir o pedido");
+            if (caixinha != null && p.semPagamento()) {
+                throw new DadosInvalidosException("Este pedido não tem pagamento: não envie caixinha.");
+            }
+        }
+        repositorioPedidos.concluir(p.getId(), LocalDateTime.now(), caixinha);
+        recusarPendentes(p, "foi concluído");
+        for (Candidatura c : aceitas) {
+            String destino = p.ehOferta() ? c.getIdPrestador() : p.ajudanteDa(c);
+            String mensagem = "\"" + p.getTitulo() + "\" foi concluído."
+                    + (c.getStatusPagamento() == StatusPagamento.PENDENTE
+                    ? (p.ehOferta() ? " Combine o pagamento com quem ofereceu." : " Confirme quando receber o pagamento.")
+                    : " Obrigado pela ajuda!");
+            notificador.enviar(destino, TipoNotificacao.PEDIDO_CONCLUIDO, mensagem, p.getId(), c.getId());
+        }
     }
 
-    // Regra: quem publicou só cancela antes de o serviço começar (Aberto ou Aceito)
+    // Quem publicou cancela enquanto o pedido não foi concluído. Candidaturas aceitas viram CANCELADA (com aviso).
     private void cancelarPeloSolicitante(Pedido p, String usuarioId) {
         p.validarSolicitante(usuarioId);
-        if (p.getStatus() != StatusPedido.ABERTO && p.getStatus() != StatusPedido.ACEITO) {
-            throw new RegraNegocioException("O pedido só pode ser cancelado antes de o serviço começar.");
+        if (p.getStatus() != StatusPedido.ABERTO && p.getStatus() != StatusPedido.EM_ANDAMENTO) {
+            throw new RegraNegocioException("O pedido só pode ser cancelado antes de ser concluído.");
         }
-        if (p.getStatus() == StatusPedido.ACEITO) {
-            repositorioCandidaturas.alterarStatus(p.getIdCandidaturaEscolhida(), StatusCandidatura.RECUSADO);
-            notificador.enviar(p.getIdPrestador(), TipoNotificacao.PEDIDO_CANCELADO,
-                    "O pedido \"" + p.getTitulo() + "\" foi cancelado pelo solicitante.", p.getId(), p.getIdCandidaturaEscolhida());
+        for (Candidatura aceita : repositorioCandidaturas.obterAceitas(p.getId())) {
+            repositorioCandidaturas.alterarStatus(aceita.getId(), StatusCandidatura.CANCELADA);
+            notificador.enviar(aceita.getIdPrestador(), TipoNotificacao.PEDIDO_CANCELADO,
+                    "O pedido \"" + p.getTitulo() + "\" foi cancelado por quem publicou.", p.getId(), aceita.getId());
         }
         repositorioPedidos.alterarStatus(p.getId(), StatusPedido.CANCELADO);
-        recusarPendentes(p, "foi cancelado pelo solicitante");
+        recusarPendentes(p, "foi cancelado por quem publicou");
     }
 
     // ============================== PAGAMENTO ==============================
 
-    // Regra: só depois que a conclusão é confirmada. Quem recebeu a ajuda registra (OFERTA nunca tem pagamento).
-    // A caixinha e a data ficam no pedido (caixinha, dt_recompensa); o status fica na candidatura escolhida.
-    public Pedido registrarPagamento(String id, PagamentoRequest pedido) {
+    // O pagamento acontece fora do app: o banco só registra a confirmação de quem RECEBEU.
+    // AJUDA: quem ajudou (candidato aceito) confirma, depois da conclusão.
+    // OFERTA: quem ofereceu confirma, um interessado aceito por vez (idCandidatura quando há mais de um).
+    // Pedido sem pagamento com recompensa: quem ajudou confirma que recebeu a recompensa (dt_recompensa).
+    public Pedido confirmarPagamento(String id, PagamentoRequest pedido) {
+        String usuarioId = pedido.getUsuarioId();
         Pedido p = buscarExistente(id);
-        p.validarAjudado(pedido.getUsuarioId());
-        if (p.semPagamento()) {
-            throw new RegraNegocioException("Esta publicação não tem pagamento.");
+        Candidatura c = escolherAceita(p, pedido.getIdCandidatura());
+        if (!usuarioId.equals(p.ajudanteDa(c))) {
+            throw new AcessoNegadoException("Somente quem recebeu o pagamento (quem ajudou ou ofereceu) pode confirmar.");
         }
-        p.validarStatus(StatusPedido.CONCLUIDO, "registrar o pagamento");
-        if (p.getStatusPagamento() != StatusPagamento.PENDENTE) {
-            throw new RegraNegocioException("O pagamento deste pedido já foi registrado.");
+        if (!p.ehOferta()) {
+            p.validarStatus(StatusPedido.CONCLUIDO, "confirmar o recebimento");
+        } else if (p.getStatus() == StatusPedido.CANCELADO) {
+            throw new RegraNegocioException("Esta oferta foi cancelada.");
         }
-        double caixinha = pedido.getCaixinha() == null ? 0 : pedido.getCaixinha();
-        repositorioPedidos.registrarPagamento(id, caixinha, LocalDateTime.now());
-        repositorioCandidaturas.alterarStatusPagamento(p.getIdCandidaturaEscolhida(), StatusPagamento.REGISTRADO, null);
-        double total = (p.getValor() == null ? 0 : p.getValor()) + caixinha;
-        notificador.enviar(p.getIdAjudante(), TipoNotificacao.PAGAMENTO_REGISTRADO,
-                "Pagamento de R$ " + String.format("%.2f", total) + " registrado em \"" + p.getTitulo()
-                        + "\". Confirme o recebimento.", id, p.getIdCandidaturaEscolhida());
-        System.out.println("[AUDITORIA] Pagamento registrado: pedido=" + id + " total=" + total);
-        return repositorioPedidos.buscarPorId(id);
-    }
 
-    // Quem ajudou confirma que recebeu: a ajuda é finalizada
-    public Pedido confirmarPagamento(String id, String usuarioId) {
-        Pedido p = buscarExistente(id);
-        p.validarAjudante(usuarioId);
-        if (p.getStatus() != StatusPedido.CONCLUIDO || p.getStatusPagamento() != StatusPagamento.REGISTRADO) {
-            throw new RegraNegocioException("Não há pagamento aguardando confirmação neste pedido.");
+        if (p.semPagamento()) {
+            if (p.getRecompensa() == null || p.ehOferta()) {
+                throw new RegraNegocioException("Este pedido não tem pagamento para confirmar.");
+            }
+            if (p.getDtRecompensa() != null) {
+                throw new RegraNegocioException("O recebimento da recompensa já foi confirmado.");
+            }
+            repositorioPedidos.confirmarRecompensa(id, LocalDateTime.now());
+            notificador.enviar(p.ajudadoDa(c), TipoNotificacao.RECOMPENSA_CONFIRMADA,
+                    p.nomeDoAjudante() + " confirmou que recebeu a recompensa de \"" + p.getTitulo() + "\".", id, c.getId());
+        } else {
+            if (c.getStatusPagamento() == StatusPagamento.CONFIRMADO) {
+                throw new RegraNegocioException("O pagamento desta candidatura já foi confirmado.");
+            }
+            confirmar(p, c, false);
         }
-        finalizar(p, false);
         return repositorioPedidos.buscarPorId(id);
     }
 
     // ============================== PRAZOS ==============================
 
     // Chamado sempre que pedidos ou notificações são consultados:
-    // 1) pedido Aberto com a data vencida vira EXPIRADO (e a fila de candidatos é encerrada)
-    // 2) pagamento sem confirmação do prestador em 48h é confirmado automaticamente
+    // 1) pedido Aberto com a data vencida e sem ninguém aceito vira CANCELADO (e a fila é encerrada)
+    // 2) pagamento sem confirmação 48h depois da conclusão é confirmado automaticamente
     public void verificarPrazos() {
         LocalDateTime agora = LocalDateTime.now();
         for (Pedido p : repositorioPedidos.obterAbertosVencidos(agora)) {
-            repositorioPedidos.alterarStatus(p.getId(), StatusPedido.EXPIRADO);
-            recusarPendentes(p, "expirou");
+            repositorioPedidos.alterarStatus(p.getId(), StatusPedido.CANCELADO);
+            recusarPendentes(p, "passou da data e foi encerrado");
         }
-        for (Pedido p : repositorioPedidos.obterComPagamentoRegistrado()) {
-            if (p.prazoDePagamentoVencido(agora)) {
-                finalizar(p, true);
-            }
+        for (Candidatura c : repositorioCandidaturas.obterPagamentosPendentesAte(agora.minusHours(Pedido.HORAS_PARA_CONFIRMAR_PAGAMENTO))) {
+            Pedido p = repositorioPedidos.buscarPorId(c.getIdPedido());
+            confirmar(p, c, true);
         }
     }
 
     // ============================== AUXILIARES ==============================
 
-    private void finalizar(Pedido p, boolean automatico) {
-        repositorioCandidaturas.alterarStatusPagamento(p.getIdCandidaturaEscolhida(), StatusPagamento.CONFIRMADO, LocalDateTime.now());
-        repositorioPedidos.alterarStatus(p.getId(), StatusPedido.FINALIZADO);
+    private void confirmar(Pedido p, Candidatura c, boolean automatico) {
+        repositorioCandidaturas.alterarStatusPagamento(c.getId(), StatusPagamento.CONFIRMADO, LocalDateTime.now());
         String mensagem = automatico
-                ? "O pagamento de \"" + p.getTitulo() + "\" foi confirmado automaticamente (sem resposta em 48h). Ajuda finalizada."
-                : p.nomeDoAjudante() + " confirmou o recebimento do pagamento de \"" + p.getTitulo() + "\". Ajuda finalizada.";
-        notificador.enviar(p.getIdAjudado(), TipoNotificacao.PAGAMENTO_CONFIRMADO, mensagem, p.getId(), p.getIdCandidaturaEscolhida());
-        System.out.println("[AUDITORIA] Ajuda finalizada: " + p.getId() + (automatico ? " (automático)" : ""));
+                ? "O pagamento de \"" + p.getTitulo() + "\" foi confirmado automaticamente (sem resposta em 48h)."
+                : "O recebimento do pagamento de \"" + p.getTitulo() + "\" foi confirmado.";
+        notificador.enviar(p.ajudadoDa(c), TipoNotificacao.PAGAMENTO_CONFIRMADO, mensagem, p.getId(), c.getId());
+        System.out.println("[AUDITORIA] Pagamento confirmado: candidatura " + c.getId() + (automatico ? " (automático)" : ""));
     }
 
-    // Fim da fila: quem ainda estava PENDENTE vira RECUSADO e recebe aviso
+    // Candidatura aceita usada na confirmação: em AJUDA é a única; em OFERTA com vários, idCandidatura diz qual
+    private Candidatura escolherAceita(Pedido p, String idCandidatura) {
+        ArrayList<Candidatura> aceitas = repositorioCandidaturas.obterAceitas(p.getId());
+        if (aceitas.isEmpty()) {
+            throw new RegraNegocioException("Este pedido não tem candidatura aceita.");
+        }
+        if (idCandidatura == null || idCandidatura.isBlank()) {
+            if (aceitas.size() > 1) {
+                throw new DadosInvalidosException("Esta oferta tem " + aceitas.size()
+                        + " interessados aceitos: informe o idCandidatura.");
+            }
+            return aceitas.get(0);
+        }
+        for (Candidatura c : aceitas) {
+            if (c.getId().equals(idCandidatura)) {
+                return c;
+            }
+        }
+        throw new RegraNegocioException("A candidatura " + idCandidatura + " não está aceita neste pedido.");
+    }
+
+    // Participante: quem publicou ou quem tem candidatura aceita no pedido
+    private boolean participa(Pedido p, String usuarioId) {
+        if (usuarioId == null || usuarioId.isBlank()) {
+            return false;
+        }
+        if (p.ehSolicitante(usuarioId) || p.ehPrestador(usuarioId)) {
+            return true;
+        }
+        if (!p.ehOferta() || p.getTotalAceitas() == null || p.getTotalAceitas() == 0) {
+            return false;
+        }
+        for (Candidatura c : repositorioCandidaturas.obterAceitas(p.getId())) {
+            if (c.ehDoPrestador(usuarioId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Fim da fila: quem ainda estava PENDENTE vira RECUSADA e recebe aviso
     private void recusarPendentes(Pedido p, String motivo) {
         for (Candidatura pendente : repositorioCandidaturas.obterPendentes(p.getId())) {
-            repositorioCandidaturas.alterarStatus(pendente.getId(), StatusCandidatura.RECUSADO);
+            repositorioCandidaturas.alterarStatus(pendente.getId(), StatusCandidatura.RECUSADA);
             notificador.enviar(pendente.getIdPrestador(), TipoNotificacao.CANDIDATURA_RECUSADA,
                     "O pedido \"" + p.getTitulo() + "\" " + motivo + ". Sua candidatura foi encerrada.", p.getId(), pendente.getId());
         }
     }
 
+    // Pedido sem pagamento: as candidaturas nascem NAO_APLICAVEL; com pagamento, PENDENTE
+    public static StatusPagamento statusPagamentoInicial(Pedido p) {
+        return p.semPagamento() ? StatusPagamento.NAO_APLICAVEL : StatusPagamento.PENDENTE;
+    }
+
     // Regras do formulário: tipo AJUDA ou OFERTA, categoria existente, data futura, data final depois do início,
-    // valor obrigatório quando há pagamento; OFERTA é sempre sem pagamento
+    // valor obrigatório quando há pagamento (vale para AJUDA e para OFERTA, ex.: produto à venda)
     private void validarDados(Pedido p) {
         String tipo = p.getTipoPublicacao() == null || p.getTipoPublicacao().isBlank()
                 ? TIPO_PUBLICACAO_PADRAO : tipoValido(p.getTipoPublicacao());
         p.setTipoPublicacao(tipo);
-        if (p.ehOferta()) {
-            if (p.getValor() != null) {
-                throw new DadosInvalidosException("Oferta de ajuda não tem pagamento: não envie valor.");
-            }
-            p.setNaoIncluirPagamento(true);
-        }
         if (repositorioCategorias.buscarPorId(p.getIdCategoria()) == null) {
             throw new DadosInvalidosException("Categoria não encontrada: " + p.getIdCategoria());
         }
@@ -307,7 +354,7 @@ public class PedidoService {
         throw new DadosInvalidosException("O tipo de publicação deve ser AJUDA ou OFERTA.");
     }
 
-    // Sem chat e sem telefone no banco: o contato é o e-mail, visível só para os dois participantes
+    // Sem chat e sem telefone no banco: o contato é o e-mail, visível só para os participantes
     private void esconderContatos(Pedido p) {
         p.setEmailSolicitante(null);
         p.setEmailPrestador(null);

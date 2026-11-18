@@ -1,6 +1,7 @@
 package br.com.juntto.model;
 
-// PENDENTE: na fila | ESCOLHIDO: vai fazer o serviço | RECUSADO: pedido encerrado sem ele | CANCELADO: desistiu
+// Valores do CHECK tb_can_ped_sta_ck (documento de banco do grupo).
+// PENDENTE: na fila | ACEITA: participa do pedido | RECUSADA: não foi aceita | CANCELADA: o candidato desistiu
 public enum StatusCandidatura {
-    PENDENTE, ESCOLHIDO, RECUSADO, CANCELADO
+    PENDENTE, ACEITA, RECUSADA, CANCELADA
 }

@@ -21,7 +21,11 @@ public interface RepositorioCandidaturas {
 
     ArrayList<Candidatura> obterPendentes(String idPedido);
 
-    Candidatura buscarEscolhida(String idPedido);
+    ArrayList<Candidatura> obterAceitas(String idPedido);
+
+    ArrayList<Candidatura> obterPagamentosPendentesAte(LocalDateTime limite);
+
+    void alterarStatusPagamentoDasPendentes(String idPedido, StatusPagamento status);
 
     boolean existe(String idPedido, String usuarioId);
 

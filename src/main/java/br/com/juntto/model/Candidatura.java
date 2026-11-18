@@ -15,6 +15,7 @@ public class Candidatura {
     private String idPrestador;
     private String nomePrestador;
     private String fotoPrestador;
+    private String emailPrestador;
     private Double mediaEstrelasPrestador;
     private Integer totalAvaliacoesPrestador;
     private StatusCandidatura status;
@@ -49,6 +50,9 @@ public class Candidatura {
     public String getFotoPrestador() { return fotoPrestador; }
     public void setFotoPrestador(String fotoPrestador) { this.fotoPrestador = fotoPrestador; }
 
+    public String getEmailPrestador() { return emailPrestador; }
+    public void setEmailPrestador(String emailPrestador) { this.emailPrestador = emailPrestador; }
+
     public Double getMediaEstrelasPrestador() { return mediaEstrelasPrestador; }
     public void setMediaEstrelasPrestador(Double mediaEstrelasPrestador) { this.mediaEstrelasPrestador = mediaEstrelasPrestador; }
 
@@ -67,9 +71,13 @@ public class Candidatura {
     public LocalDateTime getDtConfirmacaoPagamento() { return dtConfirmacaoPagamento; }
     public void setDtConfirmacaoPagamento(LocalDateTime dtConfirmacaoPagamento) { this.dtConfirmacaoPagamento = dtConfirmacaoPagamento; }
 
-    // Ainda participa do pedido (na fila ou escolhida)
+    // Ainda participa do pedido (na fila ou aceita)
     public boolean ativa() {
-        return status == StatusCandidatura.PENDENTE || status == StatusCandidatura.ESCOLHIDO;
+        return status == StatusCandidatura.PENDENTE || status == StatusCandidatura.ACEITA;
+    }
+
+    public boolean aceita() {
+        return status == StatusCandidatura.ACEITA;
     }
 
     public boolean ehDoPrestador(String usuarioId) {

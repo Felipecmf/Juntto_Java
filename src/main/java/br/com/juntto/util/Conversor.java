@@ -6,7 +6,7 @@ import org.modelmapper.convention.MatchingStrategies;
 
 import java.util.ArrayList;
 
-// Converte DTO -> model e model -> DTO com o ModelMapper.
+// [GS] Converte DTO -> model e model -> DTO com o ModelMapper.
 // Os campos são copiados pelo nome (STRICT): "titulo" vai para "titulo", "idCategoria" para "idCategoria"...
 public class Conversor {
 

@@ -20,6 +20,10 @@ public class FeedbackRequest {
     @JsonProperty
     private Integer estrelas;
 
+    // Só em OFERTA com mais de um interessado aceito: qual candidatura o dono está avaliando
+    @JsonProperty
+    private String idCandidatura;
+
     @Size(max = 500, message = "Deve ter no máximo 500 caracteres.")
     @JsonProperty
     private String texto;
@@ -30,4 +34,5 @@ public class FeedbackRequest {
     public String getUsuarioId() { return usuarioId; }
     public Integer getEstrelas() { return estrelas; }
     public String getTexto() { return texto; }
+    public String getIdCandidatura() { return idCandidatura; }
 }

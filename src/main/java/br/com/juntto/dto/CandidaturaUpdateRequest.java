@@ -5,14 +5,14 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
-// [GS] Entrada do PUT /candidaturas/{id}: o solicitante escolhe (ESCOLHIDO) ou recusa (RECUSADO) um candidato
+// [GS] Entrada do PUT /candidaturas/{id}: quem publicou aceita (ACEITA) ou recusa (RECUSADA) um candidato
 public class CandidaturaUpdateRequest {
 
     @NotBlank(message = "Informe o usuarioId (usuário que está fazendo a ação).")
     @JsonProperty
     private String usuarioId;
 
-    @NotNull(message = "Informe o status: ESCOLHIDO ou RECUSADO.")
+    @NotNull(message = "Informe o status: ACEITA ou RECUSADA.")
     @JsonProperty
     private StatusCandidatura status;
 

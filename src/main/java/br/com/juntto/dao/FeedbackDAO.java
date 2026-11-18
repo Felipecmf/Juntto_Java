@@ -12,7 +12,7 @@ import javax.sql.DataSource;
 public class FeedbackDAO implements RepositorioFeedbacks {
 
     // Feedback + pedido + quem ajudou + quem recebeu a ajuda.
-    // Em AJUDA quem ajuda é o candidato escolhido; em OFERTA quem ajuda é o dono da publicação.
+    // Em AJUDA quem ajuda é o candidato aceito; em OFERTA quem ajuda é o dono da publicação.
     private static final String SELECT =
             "SELECT * FROM (SELECT f.id_feedback, f.tb_can_ped_id_candidatura, f.estrelas_usu_ajudante, f.estrelas_usu_pedido, "
           + "f.feedback_usu_ajudante, f.feedback_usu_pedido, f.dt_avaliacao_usu_ajudante, f.dt_avaliacao_usu_pedido, "

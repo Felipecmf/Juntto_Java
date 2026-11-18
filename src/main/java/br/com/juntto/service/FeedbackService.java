@@ -5,6 +5,7 @@ import br.com.juntto.dao.RepositorioFeedbacks;
 import br.com.juntto.dao.RepositorioPedidos;
 import br.com.juntto.dto.FeedbackRequest;
 import br.com.juntto.exception.AcessoNegadoException;
+import br.com.juntto.exception.DadosInvalidosException;
 import br.com.juntto.exception.RecursoNaoEncontradoException;
 import br.com.juntto.exception.RegraNegocioException;
 import br.com.juntto.model.Candidatura;
@@ -16,10 +17,11 @@ import br.com.juntto.model.TipoNotificacao;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 
-// Avaliação do serviço (tb_feedbacks): uma por serviço, com dois lados.
+// Avaliação (tb_feedbacks): uma por candidatura aceita, com dois lados.
 //  - quem recebeu a ajuda avalia quem ajudou -> estrelas_usu_ajudante / feedback_usu_ajudante
 //  - quem ajudou avalia quem recebeu a ajuda -> estrelas_usu_pedido   / feedback_usu_pedido
-// Em AJUDA quem ajuda é o candidato escolhido; em OFERTA quem ajuda é quem publicou.
+// Em AJUDA quem ajuda é o candidato aceito; em OFERTA quem ajuda é quem publicou
+// (e cada interessado aceito tem a sua própria avaliação).
 public class FeedbackService {
 
     private RepositorioFeedbacks repositorioFeedbacks;
@@ -35,37 +37,31 @@ public class FeedbackService {
         this.notificador = notificador;
     }
 
-    // Regras: só os dois participantes, só em serviço concluído, cada um avalia uma vez
-    // e só até 14 dias depois da conclusão
+    // Regras: só os participantes (quem publicou e o candidato aceito), só em pedido concluído,
+    // cada um avalia uma vez e só até 14 dias depois da conclusão
     public Feedback avaliar(String idPedido, FeedbackRequest pedido) {
         Pedido p = repositorioPedidos.buscarPorId(idPedido);
         if (p == null) {
             throw new RecursoNaoEncontradoException("Pedido não encontrado: " + idPedido);
         }
         String autor = pedido.getUsuarioId();
-        if (!p.ehSolicitante(autor) && !p.ehPrestador(autor)) {
-            throw new AcessoNegadoException("Somente quem recebeu e quem deu a ajuda neste serviço podem avaliá-lo.");
-        }
-        if (p.getStatus() != StatusPedido.CONCLUIDO && p.getStatus() != StatusPedido.FINALIZADO) {
-            throw new RegraNegocioException("Só serviços concluídos podem ser avaliados.");
+        Candidatura aceita = candidaturaAvaliada(p, autor, pedido.getIdCandidatura());
+        if (p.getStatus() != StatusPedido.CONCLUIDO) {
+            throw new RegraNegocioException("Só pedidos concluídos podem ser avaliados.");
         }
         if (p.getDtFinal() != null && LocalDateTime.now().isAfter(p.getDtFinal().plusDays(Feedback.DIAS_PARA_AVALIAR))) {
             throw new RegraNegocioException("O prazo de " + Feedback.DIAS_PARA_AVALIAR + " dias para avaliar este serviço terminou.");
         }
-        Candidatura escolhida = repositorioCandidaturas.buscarEscolhida(idPedido);
-        if (escolhida == null) {
-            throw new RegraNegocioException("Este pedido não tem prestador para avaliar.");
-        }
 
-        Feedback f = repositorioFeedbacks.buscarPorCandidatura(escolhida.getId());
+        Feedback f = repositorioFeedbacks.buscarPorCandidatura(aceita.getId());
         boolean novo = f == null;
         if (novo) {
             f = new Feedback();
-            f.setIdCandidatura(escolhida.getId());
+            f.setIdCandidatura(aceita.getId());
         }
         String texto = limpar(pedido.getTexto());
         String avaliado;
-        if (autor.equals(p.getIdAjudado())) {
+        if (autor.equals(p.ajudadoDa(aceita))) {
             // quem recebeu a ajuda avalia quem ajudou
             if (f.getEstrelasAjudante() != null) {
                 throw new RegraNegocioException("Você já avaliou este serviço. Use PUT /feedbacks/" + f.getId() + " para editar.");
@@ -73,7 +69,7 @@ public class FeedbackService {
             f.setEstrelasAjudante(pedido.getEstrelas());
             f.setFeedbackAjudante(texto);
             f.setDtAvaliacaoAjudante(LocalDateTime.now());
-            avaliado = p.getIdAjudante();
+            avaliado = p.ajudanteDa(aceita);
         } else {
             // quem ajudou avalia quem recebeu a ajuda
             if (f.getEstrelasAjudado() != null) {
@@ -82,7 +78,7 @@ public class FeedbackService {
             f.setEstrelasAjudado(pedido.getEstrelas());
             f.setFeedbackAjudado(texto);
             f.setDtAvaliacaoAjudado(LocalDateTime.now());
-            avaliado = p.getIdAjudado();
+            avaliado = p.ajudadoDa(aceita);
         }
         if (novo) {
             repositorioFeedbacks.adicionar(f);
@@ -91,9 +87,40 @@ public class FeedbackService {
         }
         notificador.enviar(avaliado, TipoNotificacao.NOVO_FEEDBACK,
                 "Você recebeu uma avaliação de " + pedido.getEstrelas() + " estrela(s) em \"" + p.getTitulo() + "\".",
-                idPedido, escolhida.getId());
+                idPedido, aceita.getId());
         System.out.println("[AUDITORIA] Avaliação no feedback " + f.getId() + " por " + autor);
         return repositorioFeedbacks.buscarPorId(f.getId());
+    }
+
+    // Qual candidatura aceita está sendo avaliada:
+    // - o candidato aceito avalia a própria candidatura
+    // - quem publicou: em AJUDA a única aceita; em OFERTA com vários aceitos, informa idCandidatura
+    private Candidatura candidaturaAvaliada(Pedido p, String autor, String idCandidatura) {
+        ArrayList<Candidatura> aceitas = repositorioCandidaturas.obterAceitas(p.getId());
+        for (Candidatura c : aceitas) {
+            if (c.ehDoPrestador(autor)) {
+                return c;
+            }
+        }
+        if (!p.ehSolicitante(autor)) {
+            throw new AcessoNegadoException("Somente quem recebeu e quem deu a ajuda neste serviço podem avaliá-lo.");
+        }
+        if (aceitas.isEmpty()) {
+            throw new RegraNegocioException("Este pedido não tem candidato aceito para avaliar.");
+        }
+        if (idCandidatura == null || idCandidatura.isBlank()) {
+            if (aceitas.size() > 1) {
+                throw new DadosInvalidosException("Esta oferta tem " + aceitas.size()
+                        + " interessados aceitos: informe o idCandidatura de quem você está avaliando.");
+            }
+            return aceitas.get(0);
+        }
+        for (Candidatura c : aceitas) {
+            if (c.getId().equals(idCandidatura)) {
+                return c;
+            }
+        }
+        throw new RegraNegocioException("A candidatura " + idCandidatura + " não está aceita neste pedido.");
     }
 
     // usuarioId = avaliações recebidas pelo usuário (perfil) | nenhum = todas

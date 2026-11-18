@@ -94,13 +94,13 @@ public class UsuarioService {
             if (p.getStatus() == StatusPedido.ABERTO) {
                 repositorioPedidos.alterarStatus(p.getId(), StatusPedido.CANCELADO);
                 for (Candidatura pendente : repositorioCandidaturas.obterPendentes(p.getId())) {
-                    repositorioCandidaturas.alterarStatus(pendente.getId(), StatusCandidatura.RECUSADO);
+                    repositorioCandidaturas.alterarStatus(pendente.getId(), StatusCandidatura.RECUSADA);
                 }
             }
         }
         for (Candidatura c : repositorioCandidaturas.obterPorUsuario(id)) {
             if (c.getStatus() == StatusCandidatura.PENDENTE) {
-                repositorioCandidaturas.alterarStatus(c.getId(), StatusCandidatura.CANCELADO);
+                repositorioCandidaturas.alterarStatus(c.getId(), StatusCandidatura.CANCELADA);
             }
         }
         if (repositorioUsuarios.possuiVinculos(id)) {

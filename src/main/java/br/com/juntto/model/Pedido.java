@@ -5,8 +5,8 @@ import br.com.juntto.exception.RegraNegocioException;
 
 import java.time.LocalDateTime;
 
-// Tabela tb_pedido (+ candidato escolhido e pagamento, que ficam na candidatura escolhida).
-// idSolicitante = quem publicou | idPrestador = candidato escolhido
+// Tabela tb_pedido (+ em AJUDA, o candidato aceito e o pagamento, que ficam na candidatura aceita).
+// idSolicitante = quem publicou | idPrestador = candidato aceito (só em AJUDA; em OFERTA podem ser vários)
 public class Pedido {
 
     private String id;
@@ -27,8 +27,9 @@ public class Pedido {
     private String fotoUrl;
     private Double latitude;
     private Double longitude;
-    private LocalDateTime dtPagamento;
-    private String idCandidaturaEscolhida;
+    private LocalDateTime dtRecompensa;
+    private Integer totalAceitas;
+    private String idCandidaturaAceita;
     private String idPrestador;
     private String nomePrestador;
     private StatusPagamento statusPagamento;
@@ -93,11 +94,14 @@ public class Pedido {
     public Double getLongitude() { return longitude; }
     public void setLongitude(Double longitude) { this.longitude = longitude; }
 
-    public LocalDateTime getDtPagamento() { return dtPagamento; }
-    public void setDtPagamento(LocalDateTime dtPagamento) { this.dtPagamento = dtPagamento; }
+    public LocalDateTime getDtRecompensa() { return dtRecompensa; }
+    public void setDtRecompensa(LocalDateTime dtRecompensa) { this.dtRecompensa = dtRecompensa; }
 
-    public String getIdCandidaturaEscolhida() { return idCandidaturaEscolhida; }
-    public void setIdCandidaturaEscolhida(String idCandidaturaEscolhida) { this.idCandidaturaEscolhida = idCandidaturaEscolhida; }
+    public Integer getTotalAceitas() { return totalAceitas; }
+    public void setTotalAceitas(Integer totalAceitas) { this.totalAceitas = totalAceitas; }
+
+    public String getIdCandidaturaAceita() { return idCandidaturaAceita; }
+    public void setIdCandidaturaAceita(String idCandidaturaAceita) { this.idCandidaturaAceita = idCandidaturaAceita; }
 
     public String getIdPrestador() { return idPrestador; }
     public void setIdPrestador(String idPrestador) { this.idPrestador = idPrestador; }
@@ -117,19 +121,19 @@ public class Pedido {
     public String getEmailPrestador() { return emailPrestador; }
     public void setEmailPrestador(String emailPrestador) { this.emailPrestador = emailPrestador; }
 
-    // Prazo (em horas) para o prestador confirmar o recebimento do pagamento
+    // Prazo (em horas) para quem recebeu confirmar o pagamento depois da conclusão; depois disso é confirmado sozinho
     public static final int HORAS_PARA_CONFIRMAR_PAGAMENTO = 48;
 
-    // Total = valor combinado + caixinha (só existe depois que o pagamento é registrado)
     public boolean semPagamento() {
         return Boolean.TRUE.equals(naoIncluirPagamento);
     }
 
+    // Total = valor combinado + caixinha (null quando não há pagamento)
     public Double getTotal() {
-        if (statusPagamento != StatusPagamento.REGISTRADO && statusPagamento != StatusPagamento.CONFIRMADO) {
+        if (semPagamento() || valor == null) {
             return null;
         }
-        return (valor == null ? 0 : valor) + (caixinha == null ? 0 : caixinha);
+        return valor + (caixinha == null ? 0 : caixinha);
     }
 
     // ---------- papéis: em AJUDA quem publica recebe a ajuda; em OFERTA quem publica é o ajudante ----------
@@ -138,34 +142,27 @@ public class Pedido {
         return TipoPublicacao.OFERTA.name().equals(tipoPublicacao);
     }
 
-    // Quem faz o serviço
+    // Quem faz o serviço / oferece
     public String getIdAjudante() {
         return ehOferta() ? idSolicitante : idPrestador;
     }
 
-    // Quem recebe a ajuda
+    // Quem recebe a ajuda (em OFERTA podem ser vários: fica em cada candidatura aceita)
     public String getIdAjudado() {
-        return ehOferta() ? idPrestador : idSolicitante;
+        return ehOferta() ? null : idSolicitante;
     }
 
     public String nomeDoAjudante() {
         return ehOferta() ? nomeSolicitante : nomePrestador;
     }
 
-    public String nomeDoAjudado() {
-        return ehOferta() ? nomePrestador : nomeSolicitante;
+    // Em uma candidatura deste pedido: quem ajudou e quem recebeu a ajuda
+    public String ajudanteDa(Candidatura c) {
+        return ehOferta() ? idSolicitante : c.getIdPrestador();
     }
 
-    public void validarAjudante(String usuarioId) {
-        if (getIdAjudante() == null || !getIdAjudante().equals(usuarioId)) {
-            throw new AcessoNegadoException("Somente quem está ajudando neste serviço pode fazer esta ação.");
-        }
-    }
-
-    public void validarAjudado(String usuarioId) {
-        if (getIdAjudado() == null || !getIdAjudado().equals(usuarioId)) {
-            throw new AcessoNegadoException("Somente quem está recebendo a ajuda pode fazer esta ação.");
-        }
+    public String ajudadoDa(Candidatura c) {
+        return ehOferta() ? c.getIdPrestador() : idSolicitante;
     }
 
     // Dono da publicação (em AJUDA é quem pediu; em OFERTA é quem ofereceu)
@@ -183,26 +180,18 @@ public class Pedido {
         }
     }
 
-    public void validarPrestador(String usuarioId) {
-        if (!ehPrestador(usuarioId)) {
-            throw new AcessoNegadoException("Somente o prestador escolhido para o pedido pode fazer esta ação.");
-        }
-    }
-
     public void validarStatus(StatusPedido esperado, String acao) {
         if (status != esperado) {
             throw new RegraNegocioException("Não é possível " + acao + ": o pedido está " + status + ".");
         }
     }
 
-    // Regra: editar e excluir só enquanto o pedido está Aberto
+    // Regra: editar e excluir só enquanto o pedido está Aberto e ninguém foi aceito
     public void validarEditavel() {
         validarStatus(StatusPedido.ABERTO, "alterar o pedido");
-    }
-
-    public boolean prazoDePagamentoVencido(LocalDateTime agora) {
-        return statusPagamento == StatusPagamento.REGISTRADO && dtPagamento != null
-                && dtPagamento.plusHours(HORAS_PARA_CONFIRMAR_PAGAMENTO).isBefore(agora);
+        if (totalAceitas != null && totalAceitas > 0) {
+            throw new RegraNegocioException("Não é possível alterar o pedido: já existem interessados aceitos.");
+        }
     }
 
 }

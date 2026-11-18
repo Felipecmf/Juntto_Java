@@ -17,6 +17,7 @@ public class CandidaturaResponse {
     private String idPrestador;
     private String nomePrestador;
     private String fotoPrestador;
+    private String emailPrestador;
     private Double mediaEstrelasPrestador;
     private Integer totalAvaliacoesPrestador;
     private StatusCandidatura status;
@@ -32,6 +33,7 @@ public class CandidaturaResponse {
     public String getIdPrestador() { return idPrestador; }
     public String getNomePrestador() { return nomePrestador; }
     public String getFotoPrestador() { return fotoPrestador; }
+    public String getEmailPrestador() { return emailPrestador; }
     public Double getMediaEstrelasPrestador() { return mediaEstrelasPrestador; }
     public Integer getTotalAvaliacoesPrestador() { return totalAvaliacoesPrestador; }
     public StatusCandidatura getStatus() { return status; }

@@ -23,22 +23,20 @@ public interface RepositorioPedidos {
 
     ArrayList<Pedido> obterAbertosVencidos(LocalDateTime agora);
 
-    ArrayList<Pedido> obterComPagamentoRegistrado();
-
     boolean possuiVinculos(String id);
 
     int contarAtivosDoUsuario(String usuarioId);
 
     boolean remover(String id);
 
-    // Só marca como aceito se ainda estiver Aberto (duas escolhas ao mesmo tempo: só uma vence)
-    boolean marcarComoAceito(String id);
+    // AJUDA: só passa para EM_ANDAMENTO se ainda estiver Aberto (dois aceites ao mesmo tempo: só um vence)
+    boolean marcarEmAndamento(String id);
 
     void alterarStatus(String id, StatusPedido status);
 
-    // Conclusão confirmada: grava a data/hora final real do serviço (dt_final e hora_final)
-    void concluir(String id, StatusPedido status, LocalDateTime quando);
+    // Conclusão: status CONCLUIDO, data/hora final real (dt_final e hora_final) e a caixinha, se houver
+    void concluir(String id, LocalDateTime quando, Double caixinha);
 
-    // Pagamento registrado: grava a caixinha e a data em dt_recompensa
-    void registrarPagamento(String id, double caixinha, LocalDateTime quando);
+    // Quem ajudou confirmou que recebeu a recompensa (pedido sem pagamento): grava dt_recompensa
+    void confirmarRecompensa(String id, LocalDateTime quando);
 }
