@@ -232,7 +232,9 @@ public class PedidoDAO implements RepositorioPedidos {
         p.setStatusPagamento(statusPagamento == null ? null : StatusPagamento.valueOf(statusPagamento));
         p.setDtConfirmacaoPagamento(Jdbc.lerData(rs, "dt_confirmacao_pagamento"));
         p.setIdPrestador(rs.getString("id_prestador"));
-        p.setNomePrestador(rs.getString("nm_prestador"));
+        // sem prestador o Oracle devolve só o espaço do "nome || ' ' || sobrenome": vira null
+        String nomePrestador = rs.getString("nm_prestador");
+        p.setNomePrestador(nomePrestador == null || nomePrestador.isBlank() ? null : nomePrestador);
         p.setEmailPrestador(rs.getString("email_prestador"));
         return p;
     }
