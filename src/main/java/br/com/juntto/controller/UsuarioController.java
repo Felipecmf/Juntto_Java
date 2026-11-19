@@ -74,13 +74,14 @@ public class UsuarioController {
 
     @PutMapping("/usuarios/{id}")
     public ResponseEntity<UsuarioResponse> atualizar(@PathVariable("id") String id, @Valid @RequestBody UsuarioUpdateRequest pedido) {
-        Usuario atualizado = usuarioService.atualizar(id, Conversor.converter(pedido, Usuario.class));
+        Usuario atualizado = usuarioService.atualizar(id, pedido.getUsuarioId(), Conversor.converter(pedido, Usuario.class));
         return ResponseEntity.ok(Conversor.converter(atualizado, UsuarioResponse.class));
     }
 
+    // ?usuarioId= precisa ser o próprio id (só o dono exclui a conta)
     @DeleteMapping("/usuarios/{id}")
-    public ResponseEntity<Void> remover(@PathVariable("id") String id) {
-        usuarioService.remover(id);
+    public ResponseEntity<Void> remover(@PathVariable("id") String id, @RequestParam("usuarioId") String usuarioId) {
+        usuarioService.remover(id, usuarioId);
         return ResponseEntity.noContent().build();
     }
 
@@ -91,7 +92,7 @@ public class UsuarioController {
 
     @PutMapping("/usuarios/{id}/tags")
     public ResponseEntity<ArrayList<CategoriaResponse>> salvarTags(@PathVariable("id") String id, @Valid @RequestBody TagsRequest pedido) {
-        return ResponseEntity.ok(Conversor.converterLista(usuarioService.salvarTags(id, pedido.getIdsCategorias()), CategoriaResponse.class));
+        return ResponseEntity.ok(Conversor.converterLista(usuarioService.salvarTags(id, pedido.getUsuarioId(), pedido.getIdsCategorias()), CategoriaResponse.class));
     }
 
     // [GS] Rota aninhada 1:N. ?papel=SOLICITANTE (pedidos que publiquei) ou PRESTADOR (pedidos em que me candidatei)

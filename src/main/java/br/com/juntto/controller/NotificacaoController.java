@@ -64,12 +64,13 @@ public class NotificacaoController {
     @PutMapping("/notificacoes/{id}")
     public ResponseEntity<NotificacaoResponse> atualizar(@PathVariable("id") String id,
                                                          @Valid @RequestBody NotificacaoUpdateRequest pedido) {
-        return ResponseEntity.ok(Conversor.converter(notificacaoService.atualizar(id, pedido.getLida()), NotificacaoResponse.class));
+        return ResponseEntity.ok(Conversor.converter(notificacaoService.atualizar(id, pedido.getUsuarioId(), pedido.getLida()), NotificacaoResponse.class));
     }
 
+    // ?usuarioId= precisa ser o destinatário da notificação
     @DeleteMapping("/notificacoes/{id}")
-    public ResponseEntity<Void> remover(@PathVariable("id") String id) {
-        notificacaoService.remover(id);
+    public ResponseEntity<Void> remover(@PathVariable("id") String id, @RequestParam("usuarioId") String usuarioId) {
+        notificacaoService.remover(id, usuarioId);
         return ResponseEntity.noContent().build();
     }
 }

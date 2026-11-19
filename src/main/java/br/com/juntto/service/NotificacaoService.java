@@ -61,6 +61,13 @@ public class NotificacaoService {
         return repositorio.obterPorUsuario(usuarioId, lida);
     }
 
+    // só quem recebeu a notificação marca como lida ou apaga
+    private void validarDestinatario(Notificacao n, String usuarioId) {
+        if (usuarioId == null || !usuarioId.equals(n.getIdUsuario())) {
+            throw new AcessoNegadoException("Somente o destinatário pode alterar esta notificação.");
+        }
+    }
+
     public Notificacao buscar(String id) {
         Notificacao n = repositorio.buscarPorId(id);
         if (n == null) {
@@ -69,14 +76,14 @@ public class NotificacaoService {
         return n;
     }
 
-    public Notificacao atualizar(String id, boolean lida) {
-        buscar(id);
+    public Notificacao atualizar(String id, String usuarioId, boolean lida) {
+        validarDestinatario(buscar(id), usuarioId);
         repositorio.atualizarLida(id, lida);
         return repositorio.buscarPorId(id);
     }
 
-    public void remover(String id) {
-        buscar(id);
+    public void remover(String id, String usuarioId) {
+        validarDestinatario(buscar(id), usuarioId);
         repositorio.remover(id);
     }
 }

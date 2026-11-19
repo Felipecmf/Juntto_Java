@@ -6,8 +6,13 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
-// [GS] Entrada do PUT /usuarios/{id} (e-mail e senha não mudam por aqui)
+// [GS] Entrada do PUT /usuarios/{id} (e-mail e senha não mudam por aqui; só o dono da conta altera)
 public class UsuarioUpdateRequest {
+
+    // quem está fazendo a ação: precisa ser o próprio dono da conta
+    @NotBlank(message = "Informe o usuarioId (usuário que está fazendo a ação).")
+    @JsonProperty
+    private String usuarioId;
 
     @NotBlank(message = "O campo é obrigatório.")
     @Size(min = 2, max = 20, message = "Deve ter entre 2 e 20 caracteres.")
@@ -36,6 +41,7 @@ public class UsuarioUpdateRequest {
     public UsuarioUpdateRequest() {
     }
 
+    public String getUsuarioId() { return usuarioId; }
     public String getNome() { return nome; }
     public String getSobrenome() { return sobrenome; }
     public String getFotoUrl() { return fotoUrl; }

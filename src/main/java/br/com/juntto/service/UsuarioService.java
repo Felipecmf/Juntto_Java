@@ -4,6 +4,7 @@ import br.com.juntto.dao.RepositorioCandidaturas;
 import br.com.juntto.dao.RepositorioCategorias;
 import br.com.juntto.dao.RepositorioPedidos;
 import br.com.juntto.dao.RepositorioUsuarios;
+import br.com.juntto.exception.AcessoNegadoException;
 import br.com.juntto.exception.DadosInvalidosException;
 import br.com.juntto.exception.RecursoNaoEncontradoException;
 import br.com.juntto.exception.RegraNegocioException;
@@ -71,8 +72,9 @@ public class UsuarioService {
         return id.equals(usuarioId) ? u : u.perfilPublico();
     }
 
-    public Usuario atualizar(String id, Usuario novo) {
+    public Usuario atualizar(String id, String usuarioId, Usuario novo) {
         Usuario u = buscarExistente(id);
+        validarDono(id, usuarioId);
         u.setNome(novo.getNome().trim());
         u.setSobrenome(novo.getSobrenome().trim());
         u.setFotoUrl(Validador.textoOpcional(novo.getFotoUrl(), "fotoUrl", 200));
@@ -85,8 +87,9 @@ public class UsuarioService {
 
     // Regra: não exclui com serviço em andamento. Cancela os pedidos Abertos e retira as candidaturas pendentes.
     // Com histórico (pedidos ou candidaturas), a conta é anonimizada; sem histórico, é apagada.
-    public void remover(String id) {
+    public void remover(String id, String usuarioId) {
         buscarExistente(id);
+        validarDono(id, usuarioId);
         if (repositorioPedidos.contarAtivosDoUsuario(id) > 0) {
             throw new RegraNegocioException("Existe um serviço em andamento. Conclua ou cancele antes de excluir a conta.");
         }
@@ -116,8 +119,9 @@ public class UsuarioService {
         return repositorioUsuarios.obterTags(id);
     }
 
-    public ArrayList<Categoria> salvarTags(String id, ArrayList<String> idsCategorias) {
+    public ArrayList<Categoria> salvarTags(String id, String usuarioId, ArrayList<String> idsCategorias) {
         buscarExistente(id);
+        validarDono(id, usuarioId);
         ArrayList<String> semRepetidos = new ArrayList<>();
         for (String idCategoria : idsCategorias) {
             if (repositorioCategorias.buscarPorId(idCategoria) == null) {
@@ -129,6 +133,13 @@ public class UsuarioService {
         }
         repositorioUsuarios.salvarTags(id, semRepetidos);
         return repositorioUsuarios.obterTags(id);
+    }
+
+    // RN01: só o dono da conta altera o próprio perfil, as categorias ou exclui a conta
+    private void validarDono(String id, String usuarioId) {
+        if (usuarioId == null || !usuarioId.equals(id)) {
+            throw new AcessoNegadoException("Você só pode alterar a sua própria conta.");
+        }
     }
 
     private Usuario buscarExistente(String id) {
